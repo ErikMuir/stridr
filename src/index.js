@@ -9,19 +9,25 @@ const _destinationRoot = args[0] || "dropbox-migration";
 const dryRun = args.includes('--dry-run');
 
 async function getFolderContents(path = "") {
-  const contents = { files: [], folders: [] };
+  try {
+    const contents = { files: [], folders: [] };
 
-  let response = await dropbox.filesListFolder({ path });
-  populateFolderContents(response, contents);
+    let response = await dropbox.filesListFolder({ path });
+    appendFolderContents(response, contents);
 
-  while (response.has_more) {
-    response = await dropbox.filesListFolderContinue({ cursor: response.cursor });
-    populateFolderContents(response, contents);
+    while (response.has_more) {
+      response = await dropbox.filesListFolderContinue({ cursor: response.cursor });
+      appendFolderContents(response, contents);
+    }
+
+    return contents;
+  } catch (e) {
+    console.error(e);
+    throw e;
   }
-  return contents;
 }
 
-function populateFolderContents(response, contents) {
+function appendFolderContents(response, contents) {
   contents.files = [...contents.files, ...filterFiles(response)];
   contents.folders = [...contents.folders, ...filterFolders(response)];
 }
