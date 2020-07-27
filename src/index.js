@@ -5,8 +5,8 @@ const fetch = require("isomorphic-fetch");
 const accessToken = "1Z7GgIhHDAgAAAAAAAAtrGz-KGtTF4ogAD-pdCYKSbokkiUIHSni3jYoGZXfpJdW";
 const dropbox = new Dropbox({ fetch, accessToken });
 const args = process.argv.slice(2);
-const _destinationRoot = args[0] || "dropbox-migration";
 const dryRun = args.includes('--dry-run');
+const _destinationRoot = "dropbox-migration";
 
 async function getFolderContents(path = "") {
   try {
