@@ -2,27 +2,23 @@ const fs = require("fs");
 const path = require("path");
 const Dropbox = require("dropbox").Dropbox;
 const fetch = require("isomorphic-fetch");
+const utils = require('./utils');
 
-const accessToken = "1Z7GgIhHDAgAAAAAAAAtrGz-KGtTF4ogAD-pdCYKSbokkiUIHSni3jYoGZXfpJdW";
-const dropbox = new Dropbox({ fetch, accessToken });
 const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
+const dryRun = args.includes("--dry-run") || args.includes("--dry") || args.includes("-d");
+const cleanRun = args.includes("--clean-run") || args.includes("--clean") || args.includes("-c");
 const _destinationRoot = "dropbox-migration";
-
-async function asyncForEach(array, callback) {
-  for (let i = 0; i < array.length; i++) {
-    await callback(array[i], i, array);
-  }
-}
+const { accessToken } = process.env;
+const dropbox = new Dropbox({ fetch, accessToken });
 
 async function getFolderContents(folderPath = "") {
   try {
     const contents = { files: [], folders: [] };
     let response = await dropbox.filesListFolder({ path: folderPath });
-    appendFolderContents(response, contents);
+    utils.appendFolderContents(response, contents);
     while (response.has_more) {
       response = await dropbox.filesListFolderContinue({ cursor: response.cursor });
-      appendFolderContents(response, contents);
+      utils.appendFolderContents(response, contents);
     }
     return contents;
   } catch (e) {
@@ -31,37 +27,21 @@ async function getFolderContents(folderPath = "") {
   }
 }
 
-function appendFolderContents(response, contents) {
-  contents.files.push(...filterFiles(response));
-  contents.folders.push(...filterFolders(response));
-}
-
-function filterFolders(response) {
-  return response.entries
-    .filter(x => x[".tag"] === "folder")
-    .map(x => x.path_display);
-}
-
-function filterFiles(response) {
-  return response.entries
-    .filter(x => x[".tag"] === "file" && x.is_downloadable)
-    .map(x => x.path_display);
-}
-
 async function downloadFile(filePath) {
   try {
     const fullFilePath = path.join(__dirname, _destinationRoot, filePath);
     if (fs.existsSync(fullFilePath)) {
       console.log(` - skipping file: ${filePath}`);
+    } else if (dryRun) {
+      console.log(` - would download file: ${filePath}`);
+      // fs.writeFileSync(fullFilePath, "");
     } else {
       console.log(` - downloading file: ${filePath}`);
-      if (dryRun) {
-        fs.writeFileSync(fullFilePath, "");
+      const response = await dropbox.filesDownload({ path: filePath });
+      if (response.fileBinary) {
+        fs.writeFileSync(fullFilePath, response.fileBinary, { encoding: "binary" });
       } else {
-        const response = await dropbox.filesDownload({ path: filePath });
-        if (response.fileBinary) {
-          fs.writeFileSync(fullFilePath, response.fileBinary, { encoding: "binary" });
-        }
+        console.error(`File ${filePath} does not have binary data!`);
       }
     }
   } catch (e) {
@@ -70,16 +50,18 @@ async function downloadFile(filePath) {
   }
 }
 
-async function processFolder(path = "") {
-  console.log(`Processing folder: ${path || "/"}`);
-  fs.mkdirSync(`./${_destinationRoot}${path}`, { recursive: true });
-  const contents = await getFolderContents(path);
-  await asyncForEach(contents.files, async file => await downloadFile(file));
-  await asyncForEach(contents.folders, async folder => await processFolder(folder)); // recursion!
+async function processFolder(folderPath = "") {
+  console.log(`Processing folder: ${folderPath || "/"}`);
+  fs.mkdirSync(`./${_destinationRoot}${folderPath}`, { recursive: true });
+  const contents = await getFolderContents(folderPath);
+  await utils.asyncForEach(contents.files, async file => await downloadFile(file));
+  await utils.asyncForEach(contents.folders, async folder => await processFolder(folder)); // recursion!
 }
 
 async function run() {
-  // fs.rmdirSync(_destinationRoot, { recursive: true });
+  if (cleanRun) {
+    fs.rmdirSync(_destinationRoot, { recursive: true });
+  }
   await processFolder();
   console.log("DONE!");
 }
