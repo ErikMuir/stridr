@@ -4,20 +4,22 @@ const Dropbox = require("dropbox").Dropbox;
 const fetch = require("isomorphic-fetch");
 const utils = require('./utils');
 
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run") || args.includes("--dry") || args.includes("-d");
-const cleanRun = args.includes("--clean-run") || args.includes("--clean") || args.includes("-c");
-const _destinationRoot = "dropbox-migration";
 const { accessToken } = process.env;
-const dropbox = new Dropbox({ fetch, accessToken });
+const _dropbox = new Dropbox({ fetch, accessToken });
+
+const _args = process.argv.slice(2);
+const _dryRun = _args.includes("--dry-run") || _args.includes("--dry") || _args.includes("-d");
+const _cleanRun = _args.includes("--clean-run") || _args.includes("--clean") || _args.includes("-c");
+const _destinationRoot = "dropbox-migration";
+const _skipFolders = [];
 
 async function getFolderContents(folderPath = "") {
   try {
     const contents = { files: [], folders: [] };
-    let response = await dropbox.filesListFolder({ path: folderPath });
+    let response = await _dropbox.filesListFolder({ path: folderPath });
     utils.appendFolderContents(response, contents);
     while (response.has_more) {
-      response = await dropbox.filesListFolderContinue({ cursor: response.cursor });
+      response = await _dropbox.filesListFolderContinue({ cursor: response.cursor });
       utils.appendFolderContents(response, contents);
     }
     return contents;
@@ -32,12 +34,11 @@ async function downloadFile(filePath) {
     const fullFilePath = path.join(__dirname, _destinationRoot, filePath);
     if (fs.existsSync(fullFilePath)) {
       console.log(` - skipping file: ${filePath}`);
-    } else if (dryRun) {
+    } else if (_dryRun) {
       console.log(` - would download file: ${filePath}`);
-      // fs.writeFileSync(fullFilePath, "");
     } else {
       console.log(` - downloading file: ${filePath}`);
-      const response = await dropbox.filesDownload({ path: filePath });
+      const response = await _dropbox.filesDownload({ path: filePath });
       if (response.fileBinary) {
         fs.writeFileSync(fullFilePath, response.fileBinary, { encoding: "binary" });
       } else {
@@ -52,14 +53,19 @@ async function downloadFile(filePath) {
 
 async function processFolder(folderPath = "") {
   console.log(`Processing folder: ${folderPath || "/"}`);
-  fs.mkdirSync(`./${_destinationRoot}${folderPath}`, { recursive: true });
+  if (_skipFolders.includes(folderPath.toLowerCase())) return;
   const contents = await getFolderContents(folderPath);
-  await utils.asyncForEach(contents.files, async file => await downloadFile(file));
+  const fullFolderPath = `./${_destinationRoot}${folderPath}`;
+  const alreadyExists = fs.existsSync(fullFolderPath);
+  if (!alreadyExists) {
+    fs.mkdirSync(fullFolderPath, { recursive: true });
+    await utils.asyncForEach(contents.files, async file => await downloadFile(file));
+  }
   await utils.asyncForEach(contents.folders, async folder => await processFolder(folder)); // recursion!
 }
 
 async function run() {
-  if (cleanRun) {
+  if (_cleanRun) {
     fs.rmdirSync(_destinationRoot, { recursive: true });
   }
   await processFolder();
